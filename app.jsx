@@ -57,29 +57,62 @@ function parseQuarterHourCSV(text) {
     .filter(Boolean);
 
   const rows = [];
+
+  // Helper: parse various datetime formats into a LOCAL Date
+  function parseLocalDateTime(s) {
+    // 1) DD.MM.YYYY HH:MM[:SS]
+    let m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) {
+      const dd = Number(m[1]);
+      const mo = Number(m[2]);
+      const yy = Number(m[3]);
+      const HH = Number(m[4]);
+      const MM = Number(m[5]);
+      const SS = m[6] ? Number(m[6]) : 0;
+      return new Date(yy, mo - 1, dd, HH, MM, SS, 0);
+    }
+
+    // 2) YYYY-MM-DD HH:MM[:SS]
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) {
+      const yy = Number(m[1]);
+      const mo = Number(m[2]);
+      const dd = Number(m[3]);
+      const HH = Number(m[4]);
+      const MM = Number(m[5]);
+      const SS = m[6] ? Number(m[6]) : 0;
+      return new Date(yy, mo - 1, dd, HH, MM, SS, 0);
+    }
+
+    // 3) fallback: let Date parse it (last resort)
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
   for (const line of lines) {
-    // skip obvious headers
-    if (line.toLowerCase().includes("datum") || line.toLowerCase().includes("date")) continue;
+    const low = line.toLowerCase();
 
-    // Expected: "DD.MM.YYYY HH:MM;15,024"
-    const parts = line.split(";");
-    if (parts.length < 2) continue;
+    // skip obvious headers / meta lines
+    if (
+      low.includes("datum") ||
+      low.includes("date") ||
+      low.includes("timestamp") ||
+      low.includes("zeit") ||
+      low.startsWith("#")
+    ) {
+      continue;
+    }
 
-    const left = parts[0].trim(); // "DD.MM.YYYY HH:MM"
-    const valStrRaw = parts[1].trim(); // "15,024"
-    const valStr = valStrRaw.replace(",", ".");
-
-    const m = left.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})$/);
+    // Accept common separators between datetime and value.
+    // IMPORTANT: Do not rely on naive splitting because decimal comma can confuse delimiter detection.
+    const m = line.match(/^(.+?)[;\t,]\s*([-+]?\d+(?:[\.,]\d+)?)\s*$/);
     if (!m) continue;
 
-    const dd = Number(m[1]);
-    const mm = Number(m[2]);
-    const yy = Number(m[3]);
-    const HH = Number(m[4]);
-    const MM = Number(m[5]);
+    const left = m[1].trim(); // datetime
+    const valStr = m[2].trim().replace(",", "."); // decimal comma -> dot
 
-    // CSV timestamps are treated as LOCAL interval START
-    const ts = new Date(yy, mm - 1, dd, HH, MM);
+    const ts = parseLocalDateTime(left);
+    if (!ts) continue;
 
     const v = Number(valStr);
     rows.push({ ts, v: Number.isFinite(v) ? v : 0 });
