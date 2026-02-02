@@ -56,37 +56,58 @@ function parseQuarterHourCSV(text) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const rows = [];
+  // IMPORTANT:
+  // We intentionally avoid using JS Date parsing (and even avoid constructing local Dates)
+  // for slot assignment, because DST / timezone conversions can silently reorder or
+  // mis-map values. The generator's reliable behaviour is: "one CSV line = one 15-min slot"
+  // based purely on the wall-clock HH:MM in the file.
+  //
+  // Supported datetime formats:
+  //  - DD.MM.YYYY HH:MM[:SS]
+  //  - YYYY-MM-DD H:MM[:SS]
+  //
+  // Output is grouped by dayKey (YYYY-MM-DD) with exactly 96 quarter-hour values.
+  const byDay = new Map(); // dayKey -> Array(96)
 
-  // Helper: parse various datetime formats into a LOCAL Date
-  function parseLocalDateTime(s) {
+  function ensureDay(dayKey) {
+    if (!byDay.has(dayKey)) byDay.set(dayKey, new Array(SLOTS_PER_DAY).fill(0));
+    return byDay.get(dayKey);
+  }
+
+  function parseDateAndSlot(datetimeStr) {
     // 1) DD.MM.YYYY HH:MM[:SS]
-    let m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    let m = datetimeStr.match(
+      /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+    );
     if (m) {
       const dd = Number(m[1]);
       const mo = Number(m[2]);
       const yy = Number(m[3]);
       const HH = Number(m[4]);
       const MM = Number(m[5]);
-      const SS = m[6] ? Number(m[6]) : 0;
-      return new Date(yy, mo - 1, dd, HH, MM, SS, 0);
+      const dayKey = `${yy}-${pad(mo)}-${pad(dd)}`;
+      const minutes = HH * 60 + MM;
+      const slot = minutes / 15;
+      return { dayKey, slot: Number.isInteger(slot) ? slot : null };
     }
 
-    // 2) YYYY-MM-DD HH:MM[:SS]
-    m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    // 2) YYYY-MM-DD H:MM[:SS]
+    m = datetimeStr.match(
+      /^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+    );
     if (m) {
       const yy = Number(m[1]);
       const mo = Number(m[2]);
       const dd = Number(m[3]);
       const HH = Number(m[4]);
       const MM = Number(m[5]);
-      const SS = m[6] ? Number(m[6]) : 0;
-      return new Date(yy, mo - 1, dd, HH, MM, SS, 0);
+      const dayKey = `${yy}-${pad(mo)}-${pad(dd)}`;
+      const minutes = HH * 60 + MM;
+      const slot = minutes / 15;
+      return { dayKey, slot: Number.isInteger(slot) ? slot : null };
     }
 
-    // 3) fallback: let Date parse it (last resort)
-    const d = new Date(s);
-    return Number.isFinite(d.getTime()) ? d : null;
+    return null;
   }
 
   for (const line of lines) {
@@ -111,52 +132,25 @@ function parseQuarterHourCSV(text) {
     const left = m[1].trim(); // datetime
     const valStr = m[2].trim().replace(",", "."); // decimal comma -> dot
 
-    const ts = parseLocalDateTime(left);
-    if (!ts) continue;
-
     const v = Number(valStr);
-    rows.push({ ts, v: Number.isFinite(v) ? v : 0 });
+    const parsed = parseDateAndSlot(left);
+    if (!parsed) continue;
+    if (parsed.slot === null) continue;
+    if (parsed.slot < 0 || parsed.slot >= SLOTS_PER_DAY) continue;
+
+    const arr = ensureDay(parsed.dayKey);
+    arr[parsed.slot] = Number.isFinite(v) ? v : 0;
   }
 
-  rows.sort((a, b) => a.ts - b.ts);
-
-  // group by local day
-  const byDay = new Map(); // key YYYY-MM-DD -> array of {ts,v}
-  for (const r of rows) {
-    const k = `${r.ts.getFullYear()}-${pad(r.ts.getMonth() + 1)}-${pad(r.ts.getDate())}`;
-    if (!byDay.has(k)) byDay.set(k, []);
-    byDay.get(k).push(r);
-  }
-
-  // build 96-value arrays per day (fill missing with 0)
+  // build output objects (deterministic day order)
   const days = Array.from(byDay.keys()).sort();
   const result = [];
 
   for (const dayKey of days) {
-    const [Y, M, D] = dayKey.split("-").map(Number);
-    const start = new Date(Y, M - 1, D, 0, 0, 0, 0);
-
-    const expected = new Map();
-    for (let i = 0; i < SLOTS_PER_DAY; i++) {
-      const t = new Date(start.getTime() + i * SLOT_MS);
-      expected.set(t.getTime(), 0);
-    }
-
-    for (const r of byDay.get(dayKey)) {
-      const tms = r.ts.getTime();
-      if (expected.has(tms)) expected.set(tms, r.v);
-    }
-
-    const values = [];
-    for (let i = 0; i < SLOTS_PER_DAY; i++) {
-      const t = new Date(start.getTime() + i * SLOT_MS);
-      values.push(expected.get(t.getTime()) || 0);
-    }
+    const values = byDay.get(dayKey);
 
     result.push({
       dayKey,
-      start,
-      end: new Date(start.getTime() + 24 * 3600 * 1000),
       values,
     });
   }
