@@ -313,8 +313,9 @@ function MSCONSTranslator() {
           kind +
           ".txt";
 
-        // DE settlement day convention: 22:00 UTC to 22:00 UTC
-        const startBase = new Date(`${d.dayKey}T22:00:00Z`);
+        // Interval day convention: CSV day runs 00:00–24:00 (UTC) in 15-min slots.
+        // We intentionally align DTM slots to the CSV timestamps (no DE settlement-day shift).
+        const startBase = new Date(`${d.dayKey}T00:00:00Z`);
         const endBase = new Date(startBase.getTime() + 24 * 3600 * 1000);
 
         const content = buildMSCONS({
