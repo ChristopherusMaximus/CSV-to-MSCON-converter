@@ -229,6 +229,7 @@ function MSCONSTranslator() {
   const [csvError, setCsvError] = useState("");
   const [locId, setLocId] = useState("DE913000000000000000000000000000X");
   const [direction, setDirection] = useState("consumption"); // consumption|generation
+  const [csvUnit, setCsvUnit] = useState("kwh"); // kwh|kw
   const [fallbackLinks, setFallbackLinks] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -248,7 +249,7 @@ function MSCONSTranslator() {
 
       if (!parsed.length) {
         throw new Error(
-          "CSV enthält keine lesbaren Zeilen. Erwartet: DD.MM.YYYY HH:MM;15,024 (kWh je 15 min)"
+          "CSV enthält keine lesbaren Zeilen. Erwartet: DD.MM.YYYY HH:MM;15,024"
         );
       }
 
@@ -280,7 +281,7 @@ function MSCONSTranslator() {
       return;
     }
     if (!csvDays.length) {
-      alert("Bitte zuerst eine CSV hochladen (kWh je 15 min).\n\nFormat: DD.MM.YYYY HH:MM;15,024");
+      alert("Bitte zuerst eine CSV hochladen.\n\nFormat: DD.MM.YYYY HH:MM;15,024");
       return;
     }
 
@@ -323,7 +324,7 @@ function MSCONSTranslator() {
           obis,
           start: startBase,
           end: endBase,
-          values: d.values,
+          values: csvUnit === "kw" ? d.values.map((v) => v * 0.25) : d.values,
         });
 
         allFiles.push({ name, content, month: ymd.slice(0, 6) });
@@ -417,12 +418,20 @@ function MSCONSTranslator() {
       <div className="card" style={{ marginTop: 12 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span>CSV file (kWh per 15 min)</span>
+            <span>CSV file</span>
             <input
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => handleCsvFile(e.target.files && e.target.files[0])}
             />
+          </label>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span>CSV unit</span>
+            <select value={csvUnit} onChange={(e) => setCsvUnit(e.target.value)}>
+              <option value="kwh">kWh (per 15 min)</option>
+              <option value="kw">kW (avg power, 15 min)</option>
+            </select>
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 420 }}>
